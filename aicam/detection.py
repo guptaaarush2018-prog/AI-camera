@@ -38,7 +38,8 @@ class Detection:
 class Frame:
     """A frame plus everything derived from it, passed down the processor chain."""
 
-    image: Any                      # numpy array, RGB
+    image: Any                      # numpy array, RGB — what the detector ran on
     index: int                      # monotonic frame counter
     timestamp: float                # time.monotonic() when captured
     detections: list[Detection] = field(default_factory=list)
+    display: Any = None              # full-res BGR array, only captured if requested

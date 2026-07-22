@@ -1,31 +1,30 @@
-"""Box overlay for the preview window."""
+"""Box drawing for the preview window."""
 
 import cv2
 import numpy as np
 
 from aicam.detection import Detection
 
-BOX_COLOR = (0, 255, 0, 255)   # RGBA
-TEXT_COLOR = (255, 255, 255, 255)
+BOX_COLOR = (0, 255, 0)      # BGR
+TEXT_COLOR = (255, 255, 255)
 
 
-def make_overlay(
-    detections: list[Detection], size: tuple[int, int]
-) -> np.ndarray:
-    """Build a transparent RGBA layer for Picamera2's set_overlay()."""
-    width, height = size
-    overlay = np.zeros((height, width, 4), dtype=np.uint8)
-
+def draw_detections(frame: np.ndarray, detections: list[Detection]) -> None:
+    """Draw boxes and captions directly onto a BGR frame, in place."""
     for det in detections:
-        cv2.rectangle(overlay, (det.x0, det.y0), (det.x1, det.y1), BOX_COLOR, 2)
+        cv2.rectangle(frame, (det.x0, det.y0), (det.x1, det.y1), BOX_COLOR, 2)
 
         caption = f"{det.label} {det.score:.2f}"
-        # Velocity and any other processor output tags along automatically.
-        if "speed" in det.extra:
-            caption += f" {det.extra['speed']:.1f}px/s"
+        # Processor output tags along automatically; none of it is required.
+        if "track_id" in det.extra:
+            caption = f"#{det.extra['track_id']} " + caption
+        if det.extra.get("speed"):
+            caption += f" {det.extra['speed']:.0f}px/s"
+        if "heading" in det.extra:
+            caption += f" {det.extra['heading']}"
 
         cv2.putText(
-            overlay,
+            frame,
             caption,
             (det.x0 + 4, max(det.y0 - 6, 12)),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -34,5 +33,3 @@ def make_overlay(
             1,
             cv2.LINE_AA,
         )
-
-    return overlay

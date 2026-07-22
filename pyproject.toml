@@ -1,0 +1,10 @@
+[project]
+name = "ai-camera"
+version = "0.1.0"
+description = "Live object detection on a Raspberry Pi 5 with a Hailo AI HAT"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "picamera2>=0.3.36",
+    "ultralytics>=8.4.103",
+]
