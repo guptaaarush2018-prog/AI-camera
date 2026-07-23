@@ -172,7 +172,7 @@ class Tracker:
             track.hits += 1
             track.misses = 0
             track.last_update = now
-            track.history.append((now, det.center))
+            track.history.append((now, det.ground))
             if not track.confirmed and track.hits >= self.min_hits:
                 track.confirmed = True
                 self.counts[track.label] = self.counts.get(track.label, 0) + 1
@@ -232,7 +232,7 @@ class Tracker:
             score=det.score,
             last_update=now,
         )
-        track.history.append((now, det.center))
+        track.history.append((now, det.ground))
         self._next_id += 1
         self._annotate(det, track)
         return track
@@ -240,6 +240,8 @@ class Tracker:
     @staticmethod
     def _annotate(det: Detection, track: Track) -> None:
         det.extra["track_id"] = track.id
+        # Lets later stages honour min_hits instead of trusting every blip.
+        det.extra["confirmed"] = track.confirmed
         det.extra["speed"] = track.speed()
         heading = track.heading()
         if heading:

@@ -33,6 +33,18 @@ class Detection:
     def center(self) -> tuple[float, float]:
         return ((self.x0 + self.x1) / 2, (self.y0 + self.y1) / 2)
 
+    @property
+    def ground(self) -> tuple[float, float]:
+        """Bottom-centre — roughly where the object meets the road.
+
+        The anchor for anything spatial: which lane it is in, how far back the
+        queue reaches, how fast it is travelling. The box centre floats around
+        a vehicle's windscreen, drifts across lane boundaries when the approach
+        is viewed at an angle, and moves on its own as perspective grows the
+        box. This point does none of that.
+        """
+        return ((self.x0 + self.x1) / 2, float(self.y1))
+
 
 @dataclass
 class Frame:

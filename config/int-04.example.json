@@ -1,0 +1,44 @@
+{
+  "site": "INT-04",
+  "frame_size": [1280, 720],
+  "_comment": "Example only — polygons must be drawn against real footage with tools/draw_zones.py. Coordinates are display pixels, origin top-left. Zones are scaled automatically if the pipeline runs at a different resolution.",
+  "pcu": {
+    "bicycle": 0.2,
+    "motorcycle": 0.4,
+    "car": 1.0,
+    "bus": 2.0,
+    "truck": 2.0
+  },
+  "zones": [
+    {
+      "name": "eb-left",
+      "approach": "e",
+      "movement": "left",
+      "polygon": [[610, 300], [780, 300], [900, 700], [640, 700]]
+    },
+    {
+      "name": "eb-through",
+      "approach": "e",
+      "movement": "through",
+      "polygon": [[780, 300], [950, 300], [1160, 700], [900, 700]]
+    },
+    {
+      "name": "eb-right",
+      "approach": "e",
+      "movement": "right",
+      "polygon": [[950, 300], [1120, 300], [1280, 700], [1160, 700]]
+    },
+    {
+      "name": "nb-shared",
+      "approach": "n",
+      "movement": "left|through",
+      "polygon": [[180, 300], [360, 300], [330, 700], [60, 700]]
+    },
+    {
+      "name": "nb-right",
+      "approach": "n",
+      "movement": "right",
+      "polygon": [[360, 300], [520, 300], [560, 700], [330, 700]]
+    }
+  ]
+}

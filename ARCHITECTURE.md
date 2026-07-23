@@ -11,7 +11,7 @@ every failure path ends at an ordinary traffic light.
 | **Compute** | Raspberry Pi 5 + Hailo-8L NPU |
 | **Sensing** | IMX708 camera, 1280×720 @ 30 fps |
 | **Transport** | MQTT, ~100 bytes/sec/node |
-| **Status** | Phase 1 built · Phases 2–3 designed |
+| **Status** | Phase 1 built, unvalidated · Phases 2–3 designed |
 
 ---
 
@@ -56,10 +56,21 @@ The numbering is a genuine dependency order — each phase requires the one befo
 also deliberate de-risking: the project delivers something real even if it stops after
 phase 1.
 
-### Phase 1 — Sense `[BUILT]`
+### Phase 1 — Sense `[BUILT · UNVALIDATED]`
 
 A single node counts and tracks vehicles, cyclists and pedestrians; measures queue length,
 arrival rate and speed. Output is data, not decisions.
+
+All of it runs: detection and tracking on the hardware, with stable IDs, speed, direction
+of travel and unique counts that do not double-count a briefly occluded object; lane zones
+(4.3) assigning each vehicle to a movement by its ground-contact point; and per-lane queue
+length, PCU-weighted clearance time, arrival rate and observed turning split (6.3).
+
+Two honest qualifications. Distances and speeds are still in **pixels** — real units need
+the homography in 4.3, and the "stopped" threshold that separates a queue from moving
+traffic has to be retuned for every mounting until then. And none of it has been validated
+against real traffic: the tests drive synthetic vehicles through synthetic lanes, which
+proves the arithmetic, not the perception.
 
 ### Phase 2 — Coordinate `[DESIGNED]`
 
@@ -144,6 +155,64 @@ wider network does not.
    └─────────────┘      └─────────────┘      └─────────────┘
 ```
 
+### 4.3 Cameras, approaches and lanes
+
+**One camera per approach, not per lane.** A 1280×720 sensor resolves three or four lanes
+without difficulty; splitting them is a matter of drawing zones on the image, done once at
+installation. Four cameras cover a standard crossroads.
+
+This is where the comparison with buried loops is most stark. Loops need **one sensor per
+lane**, so a junction with three-lane approaches needs twelve of them, each cut into the
+road. Adding a lane means digging up the street again. For us, re-striping the junction is
+an edit to a config file.
+
+```
+   Approach: EASTBOUND — camera on the opposite mast arm, looking back
+
+   ┌────────────┬────────────┬────────────┐
+   │  LANE 1    │  LANE 2    │  LANE 3    │   zones drawn once,
+   │  ← LEFT    │  ↑ THROUGH │  → RIGHT   │   tagged with the movement
+   └────────────┴────────────┴────────────┘   the road markings permit
+         ↓            ↓            ↓
+     left demand   through      right demand
+                    demand
+```
+
+The controller does not think in lanes, it thinks in **movements**. Zones are how pixels
+become movement demand, and for a dedicated turn lane the mapping is exact — the paint
+already told us what that queue wants to do.
+
+Vehicles are assigned to a zone by their **ground-contact point** (bottom-centre of the
+box), not the box centre, which floats around the windscreen and drifts across lane
+boundaries when the approach is viewed at an angle.
+
+**Shared lanes** (through *or* left) are the genuinely hard case, and we do not claim to
+read intent. Three responses, in descending order of trust: the queue is the queue
+regardless of intent, and blocks the same either way; the turning split can be *learned*
+from what vehicles were observed to actually do, which yields a continuously self-updating
+turning-movement count where the profession normally pays for a manual survey every few
+years; and indicators can in principle be read, but not reliably enough to base a decision
+on.
+
+**Mounting.** 5–10 m, on the mast arm over the opposite approach, looking back at oncoming
+traffic. Height is the single largest lever on both occlusion and lane separation — a
+low camera lets one lorry erase six cars.
+
+**Occlusion** is the real limit on measuring a queue by looking at it; beyond roughly
+50–80 m a queue is a solid mass. The answer is to count the boundary rather than the
+contents: virtual counting lines at the stop line and upstream turn queue length into
+arithmetic — what went in, minus what came out — which works when the middle of the queue
+is not visible at all.
+
+**Calibration.** A one-time homography from four points of known spacing on the road
+converts image coordinates into ground positions. Until that exists, speed is in pixels
+per second, which means nothing outside one specific mounting: a pixel near the horizon is
+worth ten metres and a pixel at the stop line ten centimetres.
+
+**Node count.** The Pi 5 has two CSI ports, so one node drives two cameras; a four-approach
+junction is two nodes. Inference does not need 30 fps — 10 fps is ample for traffic, which
+leaves an accelerator with headroom to spare.
+
 ---
 
 ## 5. Protocol: what crosses the wire
@@ -212,6 +281,57 @@ This is the argument that justifies the NPU existing. Lead with it.
 **Chosen — hierarchical.** A *fast local loop* (sub-second, peer-to-peer, safety-critical)
 plus a *slow regional supervisor* (minutes to hours) that tunes policy, watches health and
 flags anomalies — but is never in the control path.
+
+### 6.3 What counts as demand?
+
+The obvious rule — give green to whoever has the most vehicles — is wrong, because ten
+lorries and ten hatchbacks are not the same demand. The obvious correction, measuring the
+queue in metres instead, is also wrong, and more subtly: a queue's length includes the gaps
+drivers leave, and gaps are not demand. Worse, for *clearance* the vehicle count matters
+more than the length, because each vehicle costs roughly the same time to react and cross
+the stop line regardless of its size. Pure distance would make the lorry problem worse.
+
+The currency is neither. Green time is measured in seconds, so demand should be too:
+
+```
+clearance_time  ≈  startup_lost_time  +  (total_PCU × saturation_headway)
+                ≈  2 s                +  (total_PCU × 2 s)
+```
+
+Both constants come from established practice — a saturated lane discharges around 1800
+vehicles per hour of green, one every two seconds, after roughly two seconds of start-up
+lost time. **PCU** (Passenger Car Units) is the profession's existing answer to the lorry
+problem: bicycle 0.2, motorcycle 0.4, car 1.0, bus or lorry 2.0. These map directly onto
+the classes the detector already emits, and belong in per-site config — they vary by
+country and geometry, and an engineer will want to overrule them.
+
+Which leaves three metrics doing three different jobs:
+
+| Metric | Question it answers | Role |
+|---|---|---|
+| Clearance time (seconds, PCU-weighted) | How much green does this queue need? | Sets green **duration** |
+| Accumulated delay (vehicle-seconds) | Who has been waiting, and how long? | Decides **who** gets green |
+| Queue length (metres) | Is this about to block the junction upstream? | **Hard override** |
+
+**Accumulated delay is the one that should drive the decision.** It has a property no
+count-based rule has: it grows on its own while an approach is ignored, so a minor road
+with two vehicles waiting ninety seconds outranks a main road with ten that just arrived.
+Starvation stops being a rule we have to write and becomes something the metric cannot
+express — and it is also the quantity the demo in section 11 is judged on.
+
+Queue length in metres stays out of the score entirely and acts as an interrupt. A queue
+that reaches back into the upstream junction blocks traffic that cannot then clear even on
+green, and the jam propagates backwards faster than any optimiser can recover from.
+
+None of this is safety logic. It all sits in the advisory layer; `min_green` and
+`max_green` are enforced *below* it, which is what stops any of this reasoning, however
+well-founded, from producing an unsafe or starving signal.
+
+One consequence worth stating: once demand is weighted, *what* is being weighted becomes a
+policy choice. A bus is two cars of road space and forty people. Whether the network
+optimises for vehicle throughput or person throughput — and whether buses or trams get
+priority on a corridor — is a decision for a transport authority, which is why it belongs
+in supervisor policy (6.2) and not inside a model.
 
 ---
 
@@ -332,6 +452,41 @@ the same format, and no component can tell the difference.
 For that last one, **SUMO** (Simulation of Urban MObility) is free, open source, the standard
 research tool in this field, and drivable from Python via TraCI. A real detector feeding a
 real traffic simulator is a substantially stronger claim than a number we chose ourselves.
+
+### Measuring demand from real footage
+
+The strongest available version of that number uses real traffic: run the detector over
+video of an actual four-way junction and compare what a fixed timer did with what our
+policy would have done.
+
+There is a trap in the obvious framing, and it has to be avoided explicitly. **You cannot
+replay a recording and claim what would have happened.** The vehicles in that footage were
+responding to the signal that was actually running; change the timing and every vehicle
+reaches the stop line at a different moment, so within seconds the recording no longer
+describes a world the new controller is operating in.
+
+Video can honestly supply *demand*, not outcomes. Which gives a four-step method:
+
+1. **Measure arrivals** — run detection and tracking over the footage to record, per
+   vehicle, when it arrived at the approach, its class, and which movement it took. Real,
+   platooned, with the true heavy-vehicle mix, and it doubles as a turning-movement count.
+2. **Read the real signal timing** off the same video. The lights are in frame, so the
+   baseline is observed rather than invented.
+3. **Validate against reality** — run the model on those arrivals under the *observed*
+   timing and check the simulated queues match the queues visible in the footage. This is
+   the step that matters: if the model reproduces the real junction on the real timing, its
+   prediction for a different controller is credible.
+4. **Only then swap the controller** and report the difference.
+
+Which supports one defensible sentence, and not a stronger one:
+
+> We measured real demand at this junction from video, built a model that reproduces its
+> actual behaviour under its actual timing, and asked what that same demand would do under
+> our policy.
+
+`VideoPipeline` is step 1's foundation; steps 1 and 4 also need the lane zones and
+homography from 4.3. If the resulting improvement is modest, that is still a result — a
+validated method with a small number is worth more than a large number nobody can check.
 
 ---
 

@@ -1,0 +1,1089 @@
+<title>Traffic lights that see</title>
+
+<style>
+  /* ───────────────────────────────────────────────────────────
+     Palette taken from the road itself: asphalt, concrete, and
+     the three signal colours. Amber is the only accent; green
+     and red are reserved for meaning (go / stop, real / not).
+     ─────────────────────────────────────────────────────────── */
+  :root {
+    color-scheme: light;
+    --bg:         #F4F5F2;
+    --surface:    #FFFFFF;
+    --surface-2:  #EAEBE6;
+    --text:       #1A1D21;
+    --text-dim:   #5C6169;
+    --text-faint: #8A9098;
+    --rule:       #D3D5CE;
+    --rule-soft:  #E2E3DE;
+    --accent:     #B7770A;   /* amber, darkened to hold contrast on paper */
+    --accent-lit: #F2A20C;
+    --accent-ink: #2A1D00;
+    --go:         #1F7A46;
+    --stop:       #C0341F;
+    --road:       #DCDDD7;
+    --road-edge:  #C9CBC4;
+    --paint:      #FFFFFF;
+    --car:        #6E747C;
+    --truck:      #2E3238;
+    --shadow:     0 1px 2px rgba(20,24,28,.06), 0 8px 24px -12px rgba(20,24,28,.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg:         #17191D;
+      --surface:    #1E2126;
+      --surface-2:  #262A30;
+      --text:       #ECEDE9;
+      --text-dim:   #A0A6AE;
+      --text-faint: #6E757E;
+      --rule:       #333940;
+      --rule-soft:  #262A30;
+      --accent:     #F2A20C;
+      --accent-lit: #FFB92E;
+      --accent-ink: #2A1D00;
+      --go:         #35B368;
+      --stop:       #E8563E;
+      --road:       #26292F;
+      --road-edge:  #14161A;
+      --paint:      #C9CCC6;
+      --car:        #8C939C;
+      --truck:      #DDE0DC;
+      --shadow:     0 1px 2px rgba(0,0,0,.4), 0 12px 32px -16px rgba(0,0,0,.7);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:#17191D; --surface:#1E2126; --surface-2:#262A30;
+    --text:#ECEDE9; --text-dim:#A0A6AE; --text-faint:#6E757E;
+    --rule:#333940; --rule-soft:#262A30;
+    --accent:#F2A20C; --accent-lit:#FFB92E; --accent-ink:#2A1D00;
+    --go:#35B368; --stop:#E8563E;
+    --road:#26292F; --road-edge:#14161A; --paint:#C9CCC6;
+    --car:#8C939C; --truck:#DDE0DC;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px -16px rgba(0,0,0,.7);
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg:#F4F5F2; --surface:#FFFFFF; --surface-2:#EAEBE6;
+    --text:#1A1D21; --text-dim:#5C6169; --text-faint:#8A9098;
+    --rule:#D3D5CE; --rule-soft:#E2E3DE;
+    --accent:#B7770A; --accent-lit:#F2A20C; --accent-ink:#2A1D00;
+    --go:#1F7A46; --stop:#C0341F;
+    --road:#DCDDD7; --road-edge:#C9CBC4; --paint:#FFFFFF;
+    --car:#6E747C; --truck:#2E3238;
+    --shadow:0 1px 2px rgba(20,24,28,.06), 0 8px 24px -12px rgba(20,24,28,.18);
+  }
+
+  /* Condensed grotesque for headings — the closest a system stack gets to
+     highway signage. Monospace does the annotation, like a survey drawing. */
+  :root {
+    --sans: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+    /* Condensed grotesques, in the order they exist per platform: Windows,
+       Linux, macOS. Falls back to plain Helvetica rather than to something
+       with a different personality. */
+    --cond: "Arial Narrow", "Liberation Sans Narrow", "Nimbus Sans Narrow",
+            "Avenir Next Condensed", "HelveticaNeue-CondensedBold",
+            "DejaVu Sans Condensed", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Layout ───────────────────────────────────────────────── */
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  .col  { max-width: 68ch; }
+
+  section { padding: 72px 0; border-top: 1px solid var(--rule-soft); }
+  section:first-of-type { border-top: 0; }
+
+  /* The section divider is a lane stripe — the one decorative device on the
+     page, and it is borrowed straight from the subject. */
+  .stripe {
+    height: 10px;
+    background-image: repeating-linear-gradient(
+      to right, var(--rule) 0 34px, transparent 34px 68px);
+    opacity: .55;
+  }
+
+  /* ── Type ─────────────────────────────────────────────────── */
+  h1, h2, h3 { font-family: var(--cond); font-stretch: condensed; font-weight: 700; text-wrap: balance; margin: 0; }
+  h1 {
+    font-size: clamp(2.6rem, 6.4vw, 4.6rem);
+    line-height: 1.02;
+    letter-spacing: -.015em;
+    text-transform: uppercase;
+  }
+  h2 {
+    font-size: clamp(1.7rem, 3.4vw, 2.5rem);
+    line-height: 1.08;
+    letter-spacing: -.01em;
+    text-transform: uppercase;
+  }
+  h3 {
+    font-family: var(--sans);
+    font-size: 1.02rem;
+    font-weight: 700;
+    letter-spacing: .005em;
+  }
+
+  p { margin: 0 0 1.1em; }
+  p:last-child { margin-bottom: 0; }
+  a { color: var(--text); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  strong { font-weight: 700; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin: 0 0 14px;
+  }
+  .eyebrow.mark { color: var(--accent); }
+
+  .lede { font-size: clamp(1.08rem, 1.9vw, 1.3rem); color: var(--text-dim); line-height: 1.5; }
+  .note { font-family: var(--mono); font-size: .78rem; line-height: 1.55; color: var(--text-faint); }
+
+  .stack   { display: flex; flex-direction: column; gap: 22px; }
+  .stack-s { display: flex; flex-direction: column; gap: 12px; }
+  .head    { margin-bottom: 34px; }
+
+  /* ── Hero ─────────────────────────────────────────────────── */
+  .hero { padding: 68px 0 40px; }
+  .hero h1 { margin-bottom: 22px; }
+  .hero .lede { max-width: 56ch; }
+  .hero-meta {
+    display: flex; flex-wrap: wrap; gap: 8px 26px;
+    margin-top: 26px; font-family: var(--mono);
+    font-size: .74rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--text-faint);
+  }
+  .hero-meta b { color: var(--text-dim); font-weight: 400; }
+
+  /* ── Simulation ───────────────────────────────────────────── */
+  .sim {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .sim-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--rule-soft);
+    background: var(--surface-2);
+  }
+  .ctrl { display: flex; align-items: center; gap: 9px; }
+  .ctrl > span {
+    font-family: var(--mono); font-size: .7rem;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--text-faint);
+  }
+  .seg { display: flex; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden; }
+  .seg button {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .06em;
+    padding: 5px 11px; border: 0; border-right: 1px solid var(--rule);
+    background: var(--surface); color: var(--text-dim); cursor: pointer;
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .seg button:hover:not([aria-pressed="true"]) { background: var(--surface-2); color: var(--text); }
+  .sim-bar .push { margin-left: auto; }
+  .btn {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .08em;
+    text-transform: uppercase; padding: 6px 13px;
+    border: 1px solid var(--rule); border-radius: 2px;
+    background: var(--surface); color: var(--text); cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  :where(button, a):focus-visible { outline: 2px solid var(--accent-lit); outline-offset: 2px; }
+
+  .lanes { display: grid; grid-template-columns: 1fr 1fr; }
+  .lane { padding: 18px 20px 20px; }
+  .lane + .lane { border-left: 1px solid var(--rule-soft); }
+
+  .lane-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .lane-head h3 { font-family: var(--cond); text-transform: uppercase; letter-spacing: .04em; font-size: 1.12rem; }
+  .tag {
+    font-family: var(--mono); font-size: .64rem; letter-spacing: .12em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 2px;
+    border: 1px solid var(--rule); color: var(--text-faint); white-space: nowrap;
+  }
+  .tag.on { border-color: var(--accent); color: var(--accent); }
+
+  canvas { display: block; width: 100%; aspect-ratio: 360 / 330; }
+
+  .readout { display: flex; align-items: flex-end; gap: 22px; margin-top: 14px; }
+  .big {
+    font-family: var(--cond); font-weight: 700;
+    font-size: 2.9rem; line-height: .9;
+    font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+  }
+  .big small { font-family: var(--mono); font-size: .8rem; font-weight: 400; letter-spacing: .06em; margin-left: 5px; color: var(--text-faint); }
+  .sub { font-family: var(--mono); font-size: .72rem; line-height: 1.5; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .status {
+    margin-top: 10px; min-height: 1.5em;
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-faint);
+  }
+  .status[data-flag="held"] { color: var(--accent); }
+  .status[data-flag="max"]  { color: var(--stop); }
+
+  .verdict {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px;
+    padding: 16px 20px; border-top: 1px solid var(--rule-soft);
+    background: var(--surface-2);
+  }
+  .verdict .num { font-family: var(--cond); font-weight: 700; font-size: 1.5rem; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .verdict .txt { font-size: .93rem; color: var(--text-dim); }
+  .sim-foot { padding: 12px 20px 16px; border-top: 1px solid var(--rule-soft); }
+
+  /* ── Blocks ───────────────────────────────────────────────── */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 26px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 22px; }
+
+  .step { display: flex; gap: 16px; }
+  .step .n {
+    flex: none; width: 30px; height: 30px; display: grid; place-items: center;
+    border: 1px solid var(--accent); border-radius: 50%;
+    font-family: var(--mono); font-size: .78rem; color: var(--accent);
+  }
+  .step p { color: var(--text-dim); font-size: .96rem; }
+  .step h3 { margin-bottom: 5px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 3px; padding: 20px;
+  }
+  .card p { font-size: .95rem; color: var(--text-dim); }
+  .card h3 { margin-bottom: 7px; }
+
+  .tbl-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; min-width: 460px; }
+  th, td { text-align: left; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--rule-soft); }
+  th {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--text-faint); font-weight: 400;
+  }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; padding-right: 0; }
+  tr.win td { color: var(--text); font-weight: 700; }
+  tr.win td:first-child::after { content: " ←"; color: var(--accent); }
+
+  /* Lane zone diagram */
+  .zones { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin: 4px 0 12px; }
+  .zone {
+    background: var(--road); border: 1px dashed var(--road-edge);
+    padding: 26px 10px; text-align: center;
+    font-family: var(--mono); font-size: .74rem; color: var(--text-dim);
+  }
+  .zone b { display: block; font-size: 1.5rem; color: var(--text); line-height: 1.4; }
+  .zone i { display: block; font-style: normal; font-size: .64rem; letter-spacing: .1em; color: var(--text-faint); margin-top: 4px; }
+
+  .quote {
+    border-left: 2px solid var(--accent); padding: 4px 0 4px 22px;
+    font-family: var(--cond); font-size: clamp(1.3rem, 2.6vw, 1.75rem);
+    line-height: 1.24; letter-spacing: -.005em;
+  }
+
+  .chips { display: flex; flex-direction: column; gap: 10px; }
+  .chip { display: flex; align-items: baseline; gap: 12px; font-size: .95rem; }
+  .chip .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; transform: translateY(-1px); }
+  .chip.real .dot { background: var(--go); }
+  .chip.part .dot { background: var(--accent-lit); }
+  .chip.none .dot { background: var(--stop); }
+  .chip .lbl {
+    flex: none; width: 88px; font-family: var(--mono); font-size: .66rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint);
+  }
+
+  footer { padding: 46px 0 70px; color: var(--text-faint); font-family: var(--mono); font-size: .76rem; line-height: 1.7; }
+
+  @media (max-width: 720px) {
+    .lanes { grid-template-columns: 1fr; }
+    .lane + .lane { border-left: 0; border-top: 1px solid var(--rule-soft); }
+    section { padding: 54px 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <p class="eyebrow mark">Edge AI · Adaptive signal control</p>
+    <h1>Traffic lights<br>that see the traffic</h1>
+    <p class="lede">
+      Most signals run on a timer written years ago. They hold a green for an empty road
+      because a chart says it is 4:15 on a Tuesday. Put a camera and an AI chip on the
+      pole and the light can see who is actually waiting — then tell the next light what
+      is heading its way.
+    </p>
+    <div class="hero-meta">
+      <span><b>Compute</b> Raspberry Pi 5 + Hailo-8L</span>
+      <span><b>Sensing</b> IMX708 camera</span>
+      <span><b>Uplink</b> ~100 bytes/sec</span>
+      <span><b>Video stored</b> none</span>
+    </div>
+  </header>
+</div>
+
+<div class="wrap">
+  <div class="sim">
+    <div class="sim-bar">
+      <div class="ctrl">
+        <span>Traffic</span>
+        <div class="seg" id="segDemand">
+          <button type="button" data-v="light">Light</button>
+          <button type="button" data-v="typical" aria-pressed="true">Typical</button>
+          <button type="button" data-v="heavy">Heavy</button>
+        </div>
+      </div>
+      <div class="ctrl">
+        <span>Lorries &amp; buses</span>
+        <div class="seg" id="segHeavy">
+          <button type="button" data-v="0" aria-pressed="true">None</button>
+          <button type="button" data-v="0.15">15%</button>
+          <button type="button" data-v="0.3">30%</button>
+        </div>
+      </div>
+      <div class="ctrl push">
+        <button type="button" class="btn" id="btnPause">Pause</button>
+        <button type="button" class="btn" id="btnReset">Restart</button>
+      </div>
+    </div>
+
+    <div class="lanes">
+      <div class="lane">
+        <div class="lane-head">
+          <h3>Fixed timer</h3>
+          <span class="tag">30 s each way, always</span>
+        </div>
+        <canvas id="cvFixed" width="360" height="330" role="img"
+                aria-label="Simulated intersection controlled by a fixed 30-second timer"></canvas>
+        <div class="readout">
+          <div>
+            <div class="big" id="fxWait">0.0<small>s</small></div>
+            <div class="sub">mean wait</div>
+          </div>
+          <div class="sub" id="fxSub">cleared 0<br>queued 0</div>
+        </div>
+        <div class="status" id="fxStatus">&nbsp;</div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-head">
+          <h3>Adaptive</h3>
+          <span class="tag on">Green follows demand</span>
+        </div>
+        <canvas id="cvAdapt" width="360" height="330" role="img"
+                aria-label="Simulated intersection controlled by the adaptive policy"></canvas>
+        <div class="readout">
+          <div>
+            <div class="big" id="adWait">0.0<small>s</small></div>
+            <div class="sub">mean wait</div>
+          </div>
+          <div class="sub" id="adSub">cleared 0<br>queued 0</div>
+        </div>
+        <div class="status" id="adStatus">&nbsp;</div>
+      </div>
+    </div>
+
+    <div class="verdict">
+      <span class="num" id="verdictNum">—</span>
+      <span class="txt" id="verdictTxt">Both junctions are being given the identical stream of vehicles. Watching…</span>
+    </div>
+
+    <div class="sim-foot">
+      <p class="note">
+        Simplified model for illustration — a single junction, one lane per approach, no
+        turns, discharging at one vehicle every 2 seconds after 2 seconds of start-up lost
+        time. Both sides receive the same generated arrivals, so the only variable is the
+        controller. It is not the SUMO study, and it is not a measurement from a street.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="wrap"><div class="stripe" style="margin:56px 0 0"></div></div>
+
+<div class="wrap">
+  <section>
+    <div class="head col">
+      <p class="eyebrow">The problem</p>
+      <h2>A sensor you have to dig up the road to install</h2>
+    </div>
+    <div class="grid-2">
+      <div class="col stack-s">
+        <p>
+          Where lights do adapt, they usually sense traffic with inductive loops — wire
+          coils cut into the road surface. Installing them means closing the street. They
+          fail invisibly. And all they really know is that something metal is sitting on
+          top of them.
+        </p>
+        <p>
+          No direction. No queue length. No way to tell a bicycle from a lorry. Usually no
+          pedestrians at all. And you need <strong>one per lane</strong>, so a junction
+          with three-lane approaches needs twelve of them buried in the tarmac.
+        </p>
+      </div>
+      <div class="card">
+        <h3>What a camera on the pole gets you instead</h3>
+        <p>
+          One camera covers every lane of an approach at once. It sees direction, speed,
+          queue length, vehicle type and people waiting to cross. It costs a fraction of
+          trenching a road, mounts on hardware that is already there, and can be
+          repositioned with a screwdriver.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head col">
+      <p class="eyebrow">How it works</p>
+      <h2>Four jobs, thirty times a second</h2>
+    </div>
+    <div class="grid-2" style="gap:30px 44px">
+      <div class="step">
+        <div class="n">1</div>
+        <div>
+          <h3>See</h3>
+          <p>The AI chip finds every object in the frame and labels it — car, bus, bicycle,
+          person. This part runs on the pole, not in a data centre.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <div>
+          <h3>Remember</h3>
+          <p>It works out that the car in this frame is the <em>same</em> car as last
+          frame. That is what turns pictures into counts that don't double-count, plus
+          speed, direction and queue length.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <div>
+          <h3>Decide</h3>
+          <p>Twelve vehicles queued eastbound, one northbound with nothing behind it. So
+          it proposes giving east more green — and only proposes.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n">4</div>
+        <div>
+          <h3>Tell the neighbour</h3>
+          <p>One small message down the street: <em>twelve vehicles, arriving in forty
+          seconds</em>. The next light has its green ready. String them together and you
+          get a green wave.</p>
+        </div>
+      </div>
+    </div>
+    <p class="note col" style="margin-top:30px">
+      What leaves the pole is numbers, not video — about 100 bytes a second. A thousand
+      junctions generate less network traffic than one video stream.
+    </p>
+  </section>
+
+  <section>
+    <div class="head col">
+      <p class="eyebrow">Cameras and lanes</p>
+      <h2>One camera per road. Lanes are drawn in software.</h2>
+    </div>
+    <div class="grid-2">
+      <div class="col stack-s">
+        <p>
+          A single camera resolves three or four lanes without difficulty, so a standard
+          crossroads needs four — one per approach, mounted high on the mast arm opposite,
+          looking back at oncoming traffic.
+        </p>
+        <p>
+          Lanes become zones drawn on the image once, at installation, each tagged with the
+          movement its road markings permit. A left-turn-only lane's queue
+          <em>is</em> the left-turn demand — the paint already told us what those vehicles
+          want to do.
+        </p>
+        <p>
+          Which means that when the council re-stripes the junction, we edit a config file
+          instead of closing the street.
+        </p>
+      </div>
+      <div>
+        <div class="zones">
+          <div class="zone"><b>←</b>Left only<i>Zone 1</i></div>
+          <div class="zone"><b>↑</b>Through<i>Zone 2</i></div>
+          <div class="zone"><b>→</b>Right only<i>Zone 3</i></div>
+        </div>
+        <p class="note">
+          Eastbound approach. Each vehicle is assigned to a zone by where its wheels meet
+          the road, not by the middle of its box — at an angle, the middle of a lorry sits
+          over the next lane along.
+        </p>
+      </div>
+    </div>
+    <p class="col" style="margin-top:26px; color:var(--text-dim); font-size:.95rem">
+      <strong>Shared lanes are the hard case</strong>, and we don't claim to read a
+      driver's mind. A vehicle waiting in a "straight ahead or left" lane blocks everyone
+      behind it either way, so the queue measurement still holds — and the system learns the
+      real turning split by watching what vehicles actually did, a survey traffic engineers
+      normally commission by hand every few years.
+    </p>
+  </section>
+
+  <section>
+    <div class="head col">
+      <p class="eyebrow">Measuring demand</p>
+      <h2>Don't count cars. Count seconds.</h2>
+    </div>
+    <div class="col stack-s">
+      <p>
+        "Give green to whoever has the most vehicles" is wrong — ten lorries and ten
+        hatchbacks are not the same demand. But measuring the queue in metres instead is
+        also wrong, and more subtly: a queue's length is mostly the gaps drivers leave, and
+        gaps are not demand.
+      </p>
+      <p>
+        Green time is measured in seconds, so demand should be too. Every vehicle converts
+        into <strong>passenger car units</strong> — how much junction capacity it eats —
+        and a lane clears at roughly one car every two seconds once it gets moving.
+      </p>
+    </div>
+    <div class="tbl-wrap" style="margin:28px 0 10px">
+      <table>
+        <thead>
+          <tr><th>Approach holds</th><th class="num">Vehicles</th><th class="num">Weighted (PCU)</th><th class="num">Green needed</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>8 cars</td><td class="num">8</td><td class="num">8.0</td><td class="num">18 s</td></tr>
+          <tr class="win"><td>3 lorries + 2 cars</td><td class="num">5</td><td class="num">8.0</td><td class="num">18 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note col">
+      Counting vehicles hands the green to the first row and makes the second wait.
+      Weighted, they are identical demand — which is the correct answer.
+    </p>
+    <div class="grid-3" style="margin-top:34px">
+      <div class="card">
+        <h3>Who gets green</h3>
+        <p>Accumulated waiting time. It grows on its own while an approach is ignored, so
+        a side road with two vehicles waiting 90 seconds outranks a main road with ten that
+        just arrived — no fairness rule required.</p>
+      </div>
+      <div class="card">
+        <h3>How long for</h3>
+        <p>Green holds while that queue is still discharging and ends the moment it runs
+        dry. Switching is not free — every change spends around six seconds on amber,
+        all-red and getting moving again, so a controller that flips whenever the other
+        side looks busier is <em>slower</em> than a fixed timer.</p>
+      </div>
+      <div class="card">
+        <h3>What overrules both</h3>
+        <p>Queue length in metres. If a queue is about to reach back into the junction
+        upstream, that approach gets green regardless — a blocked junction can't clear even
+        on green, and the jam spreads backwards.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head col">
+      <p class="eyebrow mark">The constraint that outranks everything</p>
+      <h2>The AI is an optimiser, not an authority</h2>
+    </div>
+    <div class="col stack-s">
+      <p>
+        A traffic signal is safety-critical. A fault that shows green in two conflicting
+        directions kills people — both drivers look up, both see green, and neither is
+        looking for the other.
+      </p>
+      <p>
+        So the vision system never drives the signal hardware. It hands over a
+        <em>request</em>, and a separate, deliberately simple safety layer decides whether
+        that request is allowed. If it isn't, it's rejected. If the AI crashes entirely,
+        the light falls back to its ordinary timer and traffic keeps flowing.
+      </p>
+    </div>
+    <p class="quote col" style="margin:30px 0">
+      The intelligent part is allowed to be wrong.<br>
+      The safety part is not allowed to be complicated.
+    </p>
+    <h3 class="col" style="margin-bottom:16px">Conflicting greens can't happen, three times over</h3>
+    <div class="grid-3">
+      <div class="card">
+        <h3>It can't be asked for</h3>
+        <p>The AI never addresses individual lights. It picks from pre-approved
+        <em>phases</em> — combinations an engineer has already certified as safe together —
+        and chooses how long. There is no vocabulary for an unsafe combination.</p>
+      </div>
+      <div class="card">
+        <h3>It's checked anyway</h3>
+        <p>A conflict matrix — a plain table of which movements clash — is verified before
+        anything reaches the hardware.</p>
+      </div>
+      <div class="card">
+        <h3>The cabinet refuses</h3>
+        <p>Signal cabinets already contain an independent conflict monitor watching the
+        actual voltage on the actual lamps. See two conflicting greens and it physically
+        disconnects the controller. It isn't ours, and it doesn't trust us.</p>
+      </div>
+    </div>
+    <p class="col" style="margin-top:26px; color:var(--text-dim); font-size:.95rem">
+      The safety layer also enforces minimum green, the amber and all-red clearance
+      intervals, a maximum wait on every approach, and a pedestrian guarantee. Those last
+      ones exist specifically to stop the optimiser getting what it wants: an AI told to
+      maximise vehicle throughput <strong>will</strong> starve a quiet pedestrian crossing,
+      because that genuinely is the optimum. Which is exactly why that rule lives somewhere
+      the optimiser can't argue with it.
+    </p>
+  </section>
+
+  <section>
+    <div class="head col">
+      <p class="eyebrow">Privacy</p>
+      <h2>There is no footage to leak</h2>
+    </div>
+    <div class="col stack-s">
+      <p>
+        Frames enter the detector and are discarded in memory. Nothing is written to disk,
+        no plates are read, no faces are matched. What leaves the pole is a handful of
+        numbers: how many, how fast, which way.
+      </p>
+      <p>
+        This is an engineering constraint, not a policy promise. A device that
+        <em>architecturally cannot</em> produce footage is a different object from one
+        configured not to — and that is the difference between a camera a neighbourhood
+        accepts and one they campaign to remove.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="head col">
+      <p class="eyebrow">Status</p>
+      <h2>What's real, and what isn't</h2>
+    </div>
+    <div class="col chips">
+      <div class="chip real"><span class="dot"></span><span class="lbl">Running</span>
+        <span>Detection and tracking on real hardware — stable IDs, speed, direction, and counts that don't double-count an occluded vehicle.</span></div>
+      <div class="chip real"><span class="dot"></span><span class="lbl">Running</span>
+        <span>Lane zones, per-lane queue length, PCU-weighted clearance time, arrival rate, and a turning split learned from what vehicles were observed to do.</span></div>
+      <div class="chip part"><span class="dot"></span><span class="lbl">In progress</span>
+        <span>Calibration, so those measurements come out in metres and seconds rather than pixels — and a study against footage of a real junction, since so far everything has only been tested on synthetic input.</span></div>
+      <div class="chip none"><span class="dot"></span><span class="lbl">Designed</span>
+        <span>Junction-to-junction coordination over MQTT, and the signal advisory layer. Architected and simulated, not deployed.</span></div>
+      <div class="chip none"><span class="dot"></span><span class="lbl">Not claimed</span>
+        <span>Nothing here is mounted on a public pole or controls a live signal. Nothing is safety-certified. Detection at night and in bad weather is untested, and every efficiency figure is simulated.</span></div>
+    </div>
+    <p class="note col" style="margin-top:26px">
+      Being specific about this is not a weakness in the pitch. It is what makes the rest
+      of it believable.
+    </p>
+  </section>
+</div>
+
+<div class="wrap"><div class="stripe"></div></div>
+
+<div class="wrap">
+  <footer>
+    Decentralised edge-AI for adaptive traffic signal control<br>
+    Raspberry Pi 5 · Hailo-8L NPU · IMX708 · MQTT
+  </footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ── Simulation constants ────────────────────────────────────
+  // Saturation headway and start-up lost time are the standard traffic
+  // engineering figures: a lane discharges ~1800 veh/hour of green, i.e.
+  // one every 2 s, after ~2 s of everyone reacting to the change.
+  const HEADWAY = 2.0, STARTUP = 2.0;
+  const AMBER = 3.0, ALLRED = 1.5;
+  const FIXED_GREEN = 30, MIN_GREEN = 8, MAX_GREEN = 55, SWITCH_MARGIN = 2.5;
+  const TIME_SCALE = 5;                 // simulated seconds per real second
+
+  const W = 360, H = 330, CX = 180, CY = 158;
+  const ROAD = 34, LANE = 9, SPEED = 58, SPAWN = 250;
+  const LEN = { car: 11, truck: 19 };
+
+  const GROUPS = { NS: ["n", "s"], EW: ["e", "w"] };
+  const OTHER = { NS: "EW", EW: "NS" };
+  const APPROACHES = ["n", "e", "s", "w"];
+  const FREEFLOW = SPAWN / SPEED;
+
+  const RATES = {
+    light:   { n: .030, s: .030, e: .080, w: .080 },
+    typical: { n: .050, s: .050, e: .150, w: .150 },
+    heavy:   { n: .060, s: .060, e: .210, w: .210 },
+  };
+
+  // ── Deterministic arrivals, shared by both controllers ──────
+  function mulberry32(a) {
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function makeArrivals(seed, rates, heavyShare, span) {
+    const rnd = mulberry32(seed);
+    const out = [];
+    for (const ap of APPROACHES) {
+      let t = 0;
+      for (;;) {
+        t += -Math.log(1 - rnd()) / rates[ap];   // exponential gaps
+        if (t > span) break;
+        const heavy = rnd() < heavyShare;
+        out.push({ t, ap, heavy, pcu: heavy ? 2 : 1 });
+      }
+    }
+    out.sort((a, b) => a.t - b.t);
+    return out;
+  }
+
+  // ── One controller's world ──────────────────────────────────
+  class Junction {
+    constructor(adaptive, arrivals) {
+      this.adaptive = adaptive;
+      this.arrivals = arrivals;
+      this.reset();
+    }
+
+    reset() {
+      this.t = 0;
+      this.cursor = 0;
+      this.queues = { n: [], e: [], s: [], w: [] };
+      this.credit = { n: 0, e: 0, s: 0, w: 0 };
+      this.moving = [];
+      this.group = "EW";
+      this.state = "green";
+      this.stateT = 0;
+      this.cleared = 0;
+      this.delaySum = 0;
+      this.flag = "";
+    }
+
+    // Vehicle-seconds of delay waiting on a group, weighted by size. This is
+    // what decides who gets green: it grows while an approach is ignored, so
+    // a starved side road eventually outranks a busy main road on its own.
+    pressure(group) {
+      let sum = 0;
+      for (const ap of GROUPS[group]) {
+        for (const v of this.queues[ap]) {
+          const wait = this.t - v.arrive - FREEFLOW;
+          if (wait > 0) sum += wait * v.pcu;
+        }
+      }
+      return sum;
+    }
+
+    queuedIn(group) {
+      return GROUPS[group].reduce((n, ap) => n + this.queues[ap].length, 0);
+    }
+
+    step(dt) {
+      this.t += dt;
+
+      while (this.cursor < this.arrivals.length && this.arrivals[this.cursor].t <= this.t) {
+        const a = this.arrivals[this.cursor++];
+        this.queues[a.ap].push({
+          ap: a.ap, arrive: a.t, pcu: a.pcu, heavy: a.heavy,
+          len: a.heavy ? LEN.truck : LEN.car,
+          d: SPAWN, target: SPAWN,
+        });
+      }
+
+      this.stateT += dt;
+      if (this.state === "green") this.runGreen(dt);
+      else if (this.state === "amber" && this.stateT >= AMBER) this.setState("allred");
+      else if (this.state === "allred" && this.stateT >= ALLRED) {
+        this.group = OTHER[this.group];
+        this.setState("green");
+        for (const ap of APPROACHES) this.credit[ap] = 0;
+      }
+
+      this.advance(dt);
+    }
+
+    setState(s) { this.state = s; this.stateT = 0; }
+
+    runGreen(dt) {
+      // Discharge: each approach releases one vehicle per headway, and a
+      // lorry costs twice as much of the green as a car.
+      if (this.stateT > STARTUP) {
+        for (const ap of GROUPS[this.group]) {
+          // Capped, so a long empty green can't bank enough credit to fire a
+          // whole queue out at once the moment one forms.
+          this.credit[ap] = Math.min(this.credit[ap] + dt, HEADWAY * 2);
+          const q = this.queues[ap];
+          while (q.length && this.credit[ap] >= HEADWAY * q[0].pcu && q[0].d <= q[0].target + 2) {
+            this.credit[ap] -= HEADWAY * q[0].pcu;
+            const v = q.shift();
+            v.released = true;
+            this.moving.push(v);
+            this.cleared++;
+            this.delaySum += Math.max(0, this.t - v.arrive - FREEFLOW);
+          }
+        }
+      }
+
+      if (!this.adaptive) {
+        if (this.stateT >= FIXED_GREEN) this.setState("amber");
+        return;
+      }
+
+      // Every switch costs amber + all-red + start-up again: about 6.5 s of
+      // junction capacity thrown away. So the rule is not "whoever has more
+      // pressure wins" — that churns every few seconds and ends up slower than
+      // a fixed timer. Hold the green until the queue it is serving runs dry
+      // ("gap out"), and only pre-empt that when the other side is genuinely
+      // being starved.
+      const other = OTHER[this.group];
+      const mineWaiting = this.queuedIn(this.group);
+      const theirsWaiting = this.queuedIn(other);
+      this.flag = "";
+
+      if (this.stateT >= MAX_GREEN) {
+        this.flag = "max";                       // safety layer forces the change
+        this.setState("amber");
+      } else if (this.stateT >= MIN_GREEN) {
+        const starved = this.pressure(other) > this.pressure(this.group) * SWITCH_MARGIN;
+        if (theirsWaiting > 0 && (mineWaiting === 0 || starved)) this.setState("amber");
+      } else if (this.pressure(other) > this.pressure(this.group) * SWITCH_MARGIN) {
+        this.flag = "held";                      // safety layer refuses to cut it short
+      }
+    }
+
+    advance(dt) {
+      for (const ap of APPROACHES) {
+        let offset = 0;
+        for (const v of this.queues[ap]) {
+          v.target = offset + v.len / 2;
+          offset += v.len + 4;
+          if (v.d > v.target) v.d = Math.max(v.target, v.d - SPEED * dt);
+          else if (v.d < v.target) v.d = v.target;   // queue longer than the
+          // approach is wide: hold it back rather than draw it on top of the
+          // vehicle ahead. Happens off-screen, under heavy congestion.
+        }
+      }
+      for (const v of this.moving) v.d -= SPEED * dt;
+      this.moving = this.moving.filter((v) => v.d > -230);
+    }
+
+    signal(ap) {
+      if (!GROUPS[this.group].includes(ap)) return "stop";
+      if (this.state === "green") return "go";
+      if (this.state === "amber") return "amber";
+      return "stop";
+    }
+
+    get meanWait() { return this.cleared ? this.delaySum / this.cleared : 0; }
+    get queued() { return APPROACHES.reduce((n, ap) => n + this.queues[ap].length, 0); }
+  }
+
+  // ── Drawing ─────────────────────────────────────────────────
+  const css = {};
+  function readTheme() {
+    const s = getComputedStyle(document.documentElement);
+    for (const k of ["--road", "--road-edge", "--paint", "--car", "--truck",
+                     "--go", "--stop", "--accent-lit", "--surface", "--rule-soft"]) {
+      css[k] = s.getPropertyValue(k).trim();
+    }
+  }
+
+  // Right-hand traffic: 'n' arrives from the north heading south and keeps to
+  // the west side of the centre line, and so on around.
+  function place(ap, d) {
+    if (ap === "n") return { x: CX - LANE, y: CY - ROAD - d, vert: true };
+    if (ap === "s") return { x: CX + LANE, y: CY + ROAD + d, vert: true };
+    if (ap === "e") return { x: CX + ROAD + d, y: CY - LANE, vert: false };
+    return { x: CX - ROAD - d, y: CY + LANE, vert: false };
+  }
+
+  function drawJunction(ctx, j) {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = css["--surface"]; ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = css["--road"];
+    ctx.fillRect(0, CY - ROAD, W, ROAD * 2);
+    ctx.fillRect(CX - ROAD, 0, ROAD * 2, H);
+
+    ctx.strokeStyle = css["--road-edge"]; ctx.lineWidth = 1;
+    for (const [x1, y1, x2, y2] of [
+      [0, CY - ROAD, CX - ROAD, CY - ROAD], [CX + ROAD, CY - ROAD, W, CY - ROAD],
+      [0, CY + ROAD, CX - ROAD, CY + ROAD], [CX + ROAD, CY + ROAD, W, CY + ROAD],
+      [CX - ROAD, 0, CX - ROAD, CY - ROAD], [CX - ROAD, CY + ROAD, CX - ROAD, H],
+      [CX + ROAD, 0, CX + ROAD, CY - ROAD], [CX + ROAD, CY + ROAD, CX + ROAD, H],
+    ]) { ctx.beginPath(); ctx.moveTo(x1 + .5, y1 + .5); ctx.lineTo(x2 + .5, y2 + .5); ctx.stroke(); }
+
+    ctx.strokeStyle = css["--paint"]; ctx.globalAlpha = .5;
+    ctx.setLineDash([7, 7]); ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, CY + .5); ctx.lineTo(CX - ROAD, CY + .5);
+    ctx.moveTo(CX + ROAD, CY + .5); ctx.lineTo(W, CY + .5);
+    ctx.moveTo(CX + .5, 0); ctx.lineTo(CX + .5, CY - ROAD);
+    ctx.moveTo(CX + .5, CY + ROAD); ctx.lineTo(CX + .5, H);
+    ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+
+    // Stop lines double as the signal: the bar in front of each approach is
+    // the colour that approach is currently seeing.
+    const COLOR = { go: css["--go"], amber: css["--accent-lit"], stop: css["--stop"] };
+    ctx.lineWidth = 3;
+    for (const ap of APPROACHES) {
+      ctx.strokeStyle = COLOR[j.signal(ap)];
+      ctx.beginPath();
+      if (ap === "n")      { ctx.moveTo(CX - ROAD + 1, CY - ROAD - 1); ctx.lineTo(CX - 1, CY - ROAD - 1); }
+      else if (ap === "s") { ctx.moveTo(CX + 1, CY + ROAD + 1);        ctx.lineTo(CX + ROAD - 1, CY + ROAD + 1); }
+      else if (ap === "e") { ctx.moveTo(CX + ROAD + 1, CY - ROAD + 1); ctx.lineTo(CX + ROAD + 1, CY - 1); }
+      else                 { ctx.moveTo(CX - ROAD - 1, CY + 1);        ctx.lineTo(CX - ROAD - 1, CY + ROAD - 1); }
+      ctx.stroke();
+    }
+
+    const draw = (v, ap) => {
+      const p = place(ap, v.d);
+      const long = v.len, wide = v.heavy ? 10 : 8;
+      const w = p.vert ? wide : long, h = p.vert ? long : wide;
+      ctx.fillStyle = v.heavy ? css["--truck"] : css["--car"];
+      ctx.fillRect(Math.round(p.x - w / 2), Math.round(p.y - h / 2), w, h);
+    };
+    for (const ap of APPROACHES) for (const v of j.queues[ap]) draw(v, ap);
+    for (const v of j.moving) draw(v, v.ap);   // carries on in a straight line
+  }
+
+  // ── Wiring ──────────────────────────────────────────────────
+  const el = (id) => document.getElementById(id);
+  const cvF = el("cvFixed"), cvA = el("cvAdapt");
+  const ctxF = cvF.getContext("2d"), ctxA = cvA.getContext("2d");
+
+  let demand = "typical", heavyShare = 0, running = true, seed = 7;
+  let fixed, adapt;
+
+  function build() {
+    const arrivals = makeArrivals(seed, RATES[demand], heavyShare, 3600);
+    // Each junction needs its own vehicle objects, but the same schedule.
+    fixed = new Junction(false, arrivals.map((a) => ({ ...a })));
+    adapt = new Junction(true, arrivals.map((a) => ({ ...a })));
+  }
+
+  function fit(cv, ctx) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = cv.clientWidth || 360;
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssW * (H / W) * dpr);
+    ctx.setTransform(dpr * (cssW / W), 0, 0, dpr * (cssW / W), 0, 0);
+  }
+  function fitAll() { fit(cvF, ctxF); fit(cvA, ctxA); }
+
+  // Setting canvas.width wipes the bitmap, so anything that refits or
+  // recolours has to repaint — otherwise a resize while paused leaves two
+  // blank rectangles.
+  function redraw() {
+    if (!fixed) return;
+    drawJunction(ctxF, fixed);
+    drawJunction(ctxA, adapt);
+  }
+
+  const FLAG_TEXT = { held: "Min green — switch refused", max: "Max green — switch forced" };
+
+  function paintMetrics() {
+    el("fxWait").innerHTML = fixed.meanWait.toFixed(1) + "<small>s</small>";
+    el("adWait").innerHTML = adapt.meanWait.toFixed(1) + "<small>s</small>";
+    el("fxSub").innerHTML = "cleared " + fixed.cleared + "<br>queued " + fixed.queued;
+    el("adSub").innerHTML = "cleared " + adapt.cleared + "<br>queued " + adapt.queued;
+
+    const st = el("adStatus");
+    st.textContent = FLAG_TEXT[adapt.flag] || " ";
+    if (adapt.flag) st.dataset.flag = adapt.flag; else delete st.dataset.flag;
+    el("fxStatus").textContent = "Cycle " + Math.floor(fixed.t / (FIXED_GREEN * 2)) + " · unchanging";
+
+    const num = el("verdictNum"), txt = el("verdictTxt");
+    if (fixed.cleared >= 25 && adapt.cleared >= 25 && fixed.meanWait > 0) {
+      const pct = ((fixed.meanWait - adapt.meanWait) / fixed.meanWait) * 100;
+      num.textContent = (pct >= 0 ? "−" : "+") + Math.abs(pct).toFixed(0) + "%";
+      txt.textContent = pct >= 0
+        ? "mean wait under the adaptive policy, on identical traffic. The gap widens as demand gets more lopsided."
+        : "the adaptive policy is behind on this run — with light, even traffic a fixed timer is already near optimal.";
+    } else {
+      num.textContent = "—";
+      txt.textContent = "Both junctions are being given the identical stream of vehicles. Watching…";
+    }
+  }
+
+  let last = performance.now(), acc = 0, since = 0;
+  function frame(now) {
+    const real = Math.min((now - last) / 1000, 0.1);
+    last = now;
+    if (running) {
+      acc += real * TIME_SCALE;
+      while (acc > 0) {                       // fixed 50 ms steps keep it stable
+        const dt = Math.min(0.05, acc);
+        fixed.step(dt); adapt.step(dt);
+        acc -= dt;
+      }
+      drawJunction(ctxF, fixed);
+      drawJunction(ctxA, adapt);
+      since += real;
+      if (since > 0.2) { paintMetrics(); since = 0; }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function restart() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    build();
+    paintMetrics();
+    redraw();
+  }
+
+  function wireSeg(id, apply) {
+    el(id).addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-v]");
+      if (!b) return;
+      for (const other of el(id).querySelectorAll("button")) other.removeAttribute("aria-pressed");
+      b.setAttribute("aria-pressed", "true");
+      apply(b.dataset.v);
+      restart();
+    });
+  }
+  wireSeg("segDemand", (v) => { demand = v; });
+  wireSeg("segHeavy", (v) => { heavyShare = parseFloat(v); });
+
+  el("btnPause").addEventListener("click", (e) => {
+    running = !running;
+    e.currentTarget.textContent = running ? "Pause" : "Resume";
+  });
+  el("btnReset").addEventListener("click", restart);
+
+  const onTheme = () => { readTheme(); redraw(); };
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", onTheme);
+  new MutationObserver(onTheme).observe(document.documentElement, {
+    attributes: true, attributeFilter: ["data-theme"],
+  });
+  window.addEventListener("resize", () => { fitAll(); redraw(); });
+
+  readTheme();
+  fitAll();
+  build();
+  paintMetrics();
+  requestAnimationFrame(frame);
+})();
+</script>
