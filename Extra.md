@@ -34,4 +34,71 @@ Replace paragraphs with diagrams, flowcharts, comparison tables, timelines, and 
 Use concise speaker-friendly text.
 The audience should understand the presentation without reading long paragraphs.
 Statistics
+The statistics below are supporting evidence.
+Only use a statistic when it directly reinforces the message of that slide.
+Do not force every statistic into the presentation.
+If a statistic does not strengthen the point, omit it.
+Whenever a statistic is used:
+Pair it with an appropriate chart, infographic, icon, or comparison.
+Integrate it naturally into the slide narrative.
+Never place statistics in isolation.
+Presentation Structure
+Slide 1 — Title
+Project title
+Subtitle
+Author
+Hero image of a modern smart intersection.
+
+Safety Layer
+↓
+Traffic Controller
+This should be the centerpiece of the presentation.
+Slide 5 — Edge AI & Distributed Coordination
+Explain why inference occurs on-device rather than in the cloud.
+Compare:
+Latency
+Bandwidth
+Privacy
+Reliability
+Cost
+Illustrate how intersections exchange only lightweight MQTT messages.
+Slide 6 — Safety & Reliability
+Explain why AI never directly controls traffic lights.
+Show:
+AI Recommendation
+↓
+Safety Layer
+Emergency vehicle prioritization
+Pedestrian-aware crossings
+Continuous validation
+Real-world deployment
+Slide 8 — Demonstration & Validation
+Explain:
+Real Raspberry Pi + Hailo hardware
+Simulated neighboring intersections
+MQTT communication
+SUMO simulation
+Live object detection
+Include a demonstration architecture diagram.
+Slide 9 — Expected Impact
+Present only statistics that demonstrate the effectiveness of intelligent traffic control.
+Examples include:
+40% lower wait times, 25% shorter travel times, 21% lower emissions (Surtrac)
+40% lower intersection delays and 900 hours of delay eliminated (NoTraffic)
+10–20% lower delays and fuel use (Google Project Green Light)
+20% faster buses and 10% faster cyclists (Copenhagen)
+30–45 seconds saved for emergency vehicles (Fairfax County)
+Clearly state these are results from existing smart traffic systems that validate the overall approach—not results achieved by this project.
+Present the information using comparison charts rather than bullet points.
+Slide 10 — Conclusion
+Summarize:
+The problem
+The proposed solution
+Key innovations
+Future deployment
+End with a concise statement emphasizing safer, smarter, and more efficient intersections.
+Speaker Notes
+For every slide, generate concise speaker notes that expand on the visuals without reading the slide verbatim.
+Final Quality Expectations
+This presentation should not resemble a typical student PowerPoint. It should feel like a polished engineering conference presentation or startup pitch deck. Prioritize visual communication, logical flow, and technical accuracy. Every slide should have a single clear message, professionally designed layouts, and graphics that reinforce the content. Use the attached document as the authoritative reference, but improve its presentation for a technical audience rather than reproducing it.
 
