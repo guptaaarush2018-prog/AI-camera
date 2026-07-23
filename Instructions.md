@@ -114,3 +114,4 @@ By the end of this project, you will have: ✓ A fully configured Raspberry Pi 5
 ✓ Understanding of hardware acceleration
 ✓ A real-world AI application running at high performance
 
+https://drive.google.com/drive/folders/16coOR8PlNzvmUm1vsaYJVF_bAOQGySa8
