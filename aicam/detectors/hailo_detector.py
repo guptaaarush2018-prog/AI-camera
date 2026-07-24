@@ -8,6 +8,12 @@ from picamera2.devices import Hailo
 from aicam.detection import Detection
 from aicam.detectors.base import Detector
 
+# yolov8s is what `hailo-all` ships and runs at ~30 fps on the 8L. Traffic only
+# needs ~10, so there is room to trade that headroom for accuracy: drop in a
+# yolov8m_h8l.hef via --model for +5.3 mAP at ~half the frame rate (still well
+# above 10). yolov8l goes too far — it falls under the 10 fps floor. See the
+# "Upgrading the detector model" note in CLAUDE.md. Nothing else has to change:
+# the detector reads the model's own input shape and scales boxes to the frame.
 DEFAULT_MODEL = "/usr/share/hailo-models/yolov8s_h8l.hef"
 DEFAULT_LABELS = "/usr/share/hailo-models/coco.txt"
 

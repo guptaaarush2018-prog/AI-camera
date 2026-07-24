@@ -78,7 +78,7 @@ aicam/demand.py              DemandMonitor: queue, arrival rate, turning split
 aicam/draw.py                Preview overlay
 config/*.json                Per-site zone configs (not code — re-striping is an edit)
 tools/draw_zones.py          Commissioning: click zones onto a still, write a config
-site/index.html              Pitch site (published as an Artifact)
+index.html                   Pitch site + adaptive-vs-fixed sim (published as an Artifact)
 ```
 
 ## How to extend it
@@ -95,6 +95,30 @@ automatically.
 **Two streams, on purpose.** The camera runs a display-res `main` stream and a
 model-res `lores` stream so nothing is downscaled in Python. Detections are scaled to
 the *display* size, so all downstream pixel coordinates share one frame of reference.
+
+**Upgrading the detector model.** The stock `yolov8s_h8l.hef` runs at ~30 fps on the
+8L, but traffic sensing only needs ~10 (see the Hailo gotcha below). That spare compute
+is better spent on accuracy than on frames we throw away. The swap is one flag —
+`--model path/to/yolov8m_h8l.hef` — because `HailoDetector` reads the network's own
+input shape and scales boxes to the display frame; nothing downstream changes.
+
+| Model (8L, 640×640) | COCO mAP | Rough Pi 5 fps* | Verdict |
+|---|---|---|---|
+| yolov8s (stock) | 43.9 | ~30 | baseline |
+| **yolov8m** | **49.2** | **~14** | **recommended — +5.3 mAP, still comfortably over 10 fps** |
+| yolov8l | 51.8 | ~7 | too far — drops under the 10 fps floor |
+
+\* mAP and the *ratios* are from the Hailo Model Zoo (HAILO8L). The absolute fps there
+is raw-accelerator throughput (it quotes yolov8s at ~110); real Pi 5 numbers are far
+lower once host preprocessing and PCIe are in the loop, so these are the model-zoo
+ratios anchored to our measured ~30 fps for yolov8s. **Measure on the Pi before
+trusting them** — none of this has been run on hardware yet.
+
+To get the file on the Pi: the compiled HEFs live in the Hailo Model Zoo S3 bucket
+(`hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/.../hailo8l/`), or
+compile from the yolov8m config with `hailomz compile`. **It must be the `hailo8l`
+build** — a HEF compiled for the full Hailo-8 will not load on the 8L. Keep
+`yolov8s_h8l.hef` as the default so a plain `main.py` still runs on any stock install.
 
 ## Conventions
 

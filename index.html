@@ -720,6 +720,7 @@
 
   const W = 360, H = 330, CX = 180, CY = 158;
   const ROAD = 34, LANE = 9, SPEED = 58, SPAWN = 250;
+  const ACCEL = 65, GAP = 4;            // px/s² and the space kept between boxes
   const LEN = { car: 11, truck: 19 };
 
   const GROUPS = { NS: ["n", "s"], EW: ["e", "w"] };
@@ -771,7 +772,7 @@
       this.t = 0;
       this.cursor = 0;
       this.queues = { n: [], e: [], s: [], w: [] };
-      this.credit = { n: 0, e: 0, s: 0, w: 0 };
+      this.nextGo = { n: 0, e: 0, s: 0, w: 0 };
       this.moving = [];
       this.group = "EW";
       this.state = "green";
@@ -779,6 +780,14 @@
       this.cleared = 0;
       this.delaySum = 0;
       this.flag = "";
+      this.onGreenStart(this.group);
+    }
+
+    // Start-up lost time: the first vehicle of a new green does not move until
+    // its driver has reacted. Scheduling the first release STARTUP seconds out
+    // is what reproduces the ~2 s every junction loses at the head of a green.
+    onGreenStart(group) {
+      for (const ap of GROUPS[group]) this.nextGo[ap] = this.t + STARTUP;
     }
 
     // Vehicle-seconds of delay waiting on a group, weighted by size. This is
@@ -807,44 +816,44 @@
         this.queues[a.ap].push({
           ap: a.ap, arrive: a.t, pcu: a.pcu, heavy: a.heavy,
           len: a.heavy ? LEN.truck : LEN.car,
-          d: SPAWN, target: SPAWN,
+          d: SPAWN, spd: 0, released: false,
         });
       }
 
       this.stateT += dt;
-      if (this.state === "green") this.runGreen(dt);
+      if (this.state === "green") { this.release(); this.decide(); }
       else if (this.state === "amber" && this.stateT >= AMBER) this.setState("allred");
       else if (this.state === "allred" && this.stateT >= ALLRED) {
         this.group = OTHER[this.group];
         this.setState("green");
-        for (const ap of APPROACHES) this.credit[ap] = 0;
+        this.onGreenStart(this.group);
       }
 
-      this.advance(dt);
+      this.integrate(dt);
     }
 
     setState(s) { this.state = s; this.stateT = 0; }
 
-    runGreen(dt) {
-      // Discharge: each approach releases one vehicle per headway, and a
-      // lorry costs twice as much of the green as a car.
-      if (this.stateT > STARTUP) {
-        for (const ap of GROUPS[this.group]) {
-          // Capped, so a long empty green can't bank enough credit to fire a
-          // whole queue out at once the moment one forms.
-          this.credit[ap] = Math.min(this.credit[ap] + dt, HEADWAY * 2);
-          const q = this.queues[ap];
-          while (q.length && this.credit[ap] >= HEADWAY * q[0].pcu && q[0].d <= q[0].target + 2) {
-            this.credit[ap] -= HEADWAY * q[0].pcu;
-            const v = q.shift();
-            v.released = true;
-            this.moving.push(v);
-            this.cleared++;
-            this.delaySum += Math.max(0, this.t - v.arrive - FREEFLOW);
-          }
+    // Discharge is the *counting*: a vehicle is released one saturation headway
+    // after the last (twice that for a lorry), and only once it has actually
+    // rolled up to the stop line — so the tally and the animation stay in step.
+    release() {
+      for (const ap of GROUPS[this.group]) {
+        const q = this.queues[ap];
+        while (q.length && this.t >= this.nextGo[ap] && q[0].d <= q[0].len / 2 + 0.5) {
+          const v = q.shift();
+          v.released = true;
+          this.moving.push(v);
+          this.cleared++;
+          this.delaySum += Math.max(0, this.t - v.arrive - FREEFLOW);
+          // max(t, …) not +=: a long empty green must not bank releases and
+          // then fire a whole queue out at once the moment one forms.
+          this.nextGo[ap] = Math.max(this.t, this.nextGo[ap]) + HEADWAY * v.pcu;
         }
       }
+    }
 
+    decide() {
       if (!this.adaptive) {
         if (this.stateT >= FIXED_GREEN) this.setState("amber");
         return;
@@ -872,19 +881,31 @@
       }
     }
 
-    advance(dt) {
+    // Car-following, purely for the picture: every vehicle accelerates toward
+    // saturation speed but brakes smoothly to a stop behind the vehicle ahead
+    // or at the stop line — so nothing snaps away on green or freezes on a
+    // clear road. This moves the boxes, not the numbers; release() owns those.
+    integrate(dt) {
       for (const ap of APPROACHES) {
-        let offset = 0;
-        for (const v of this.queues[ap]) {
-          v.target = offset + v.len / 2;
-          offset += v.len + 4;
-          if (v.d > v.target) v.d = Math.max(v.target, v.d - SPEED * dt);
-          else if (v.d < v.target) v.d = v.target;   // queue longer than the
-          // approach is wide: hold it back rather than draw it on top of the
-          // vehicle ahead. Happens off-screen, under heavy congestion.
+        // Front (smallest d, nearest/through the junction) first, so each
+        // vehicle can be clamped behind the one ahead of it in the same lane.
+        const chain = this.moving.filter((v) => v.ap === ap).concat(this.queues[ap]);
+        chain.sort((a, b) => a.d - b.d);
+        let aheadRear = -Infinity;               // rear edge of the vehicle ahead
+        for (const v of chain) {
+          // The furthest forward (smallest d) this vehicle may sit: behind the
+          // vehicle ahead, and — until released — no closer than the stop line.
+          const gapFloor = aheadRear === -Infinity ? -Infinity
+                                                   : aheadRear + GAP + v.len / 2;
+          const floor = v.released ? gapFloor : Math.max(gapFloor, v.len / 2);
+          const room = Math.max(0, v.d - floor);
+          // Cap the speed so it can still brake to rest within `room` (v²=2·a·s).
+          const vmax = Math.sqrt(2 * ACCEL * room);
+          v.spd = Math.min(SPEED, v.spd + ACCEL * dt, vmax);
+          v.d = Math.max(floor, v.d - v.spd * dt);
+          aheadRear = v.d + v.len / 2;
         }
       }
-      for (const v of this.moving) v.d -= SPEED * dt;
       this.moving = this.moving.filter((v) => v.d > -230);
     }
 
